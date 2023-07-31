@@ -8,6 +8,12 @@
     <RootNamespace>webscraper_aiplugin</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <None Remove="Functions\Summary\skprompt.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Functions\Summary\skprompt.txt" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="1.18.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.0.13" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.OpenApi" Version="1.5.1" />

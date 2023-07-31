@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Extensions.OpenApi.Extensions;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -6,14 +7,24 @@ using Microsoft.Azure.WebJobs.Extensions.OpenApi.Core.Attributes;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
 using Microsoft.Playwright;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.SkillDefinition;
+using Microsoft.SemanticKernel.Text;
 
 public class PluginEndpoint
 {
     private readonly ILogger _logger;
+    private readonly IKernel _kernel;
+    private readonly ISKFunction _summaryFunction;
 
-    public PluginEndpoint(ILoggerFactory loggerFactory)
+    public PluginEndpoint(
+        ILoggerFactory loggerFactory, 
+        IKernel kernel)
     {
         _logger = loggerFactory.CreateLogger<PluginEndpoint>();
+        _kernel = kernel;
+        _summaryFunction = _kernel.CreateSemanticFunction(
+            Assembly.GetExecutingAssembly().LoadEmbeddedResource("webscraper_aiplugin.Functions.Summary.skprompt.txt"));            
     }
     
     [Function("WellKnownAIPlugin")]
@@ -26,7 +37,7 @@ public class PluginEndpoint
         var r = req.CreateResponse(HttpStatusCode.OK);
         await r.WriteAsJsonAsync(toReturn);
         return r;
-    }
+    }    
 
     [OpenApiOperation(operationId: "Scrape", tags: new[] { "ScrapeWebsiteFunction" }, Description = "Scrapes the given website to retrieve information based on the query.")]
     [OpenApiParameter(name: "URL", Description = "The URL of the website to scrape", Required = true, In = ParameterLocation.Query)]
@@ -57,16 +68,19 @@ public class PluginEndpoint
         {
             await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
 
-            var page = await browser.NewPageAsync(
-                new BrowserNewPageOptions
-                {
-                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.39"
-                });
-
-            await page.GotoAsync(urlToScrape);
+            var content = null as string;
             
-            var locator = page.GetByRole(AriaRole.Main).First;
-            var content = await locator.InnerTextAsync();
+            var maxRetry = 5;
+
+            for (var i = 0; i < maxRetry; i++)
+            {
+                try
+                {
+                    content = await _ScrapePage(browser, urlToScrape);                    
+                    break; //exit the loop if we are successful in scraping the page
+                }
+                catch (System.TimeoutException) { }
+            }          
 
             if (content == null)
             {
@@ -75,14 +89,35 @@ public class PluginEndpoint
 
             if (summaryRequested)
             {
-                //TODO: invoke SK and return summary
+                var maxTokens = 2000;
 
+                List<string> lines = TextChunker.SplitPlainTextLines(content, maxTokens);
+                List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
+                
+                var context = _kernel.CreateNewContext();
+                var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
+                
+                content = result.Result;
             }
 
             var r = req.CreateResponse(HttpStatusCode.OK);
             r.Headers.Add("Content-Type", "text/plain");
             await r.WriteStringAsync(content);
             return r;
-        }
+        }        
+    }
+
+    private async Task<string> _ScrapePage(IBrowser browser, string urlToScrape)
+    {
+        var page = await browser.NewPageAsync(
+                new BrowserNewPageOptions
+                {
+                    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.39"
+                });
+
+        await page.GotoAsync(urlToScrape);
+
+        var locator = page.GetByRole(AriaRole.Main).First;
+        return await locator.InnerTextAsync();
     }
 }
