@@ -34,7 +34,9 @@ var host = new HostBuilder()
 //check playwright has been installed
 if (!Directory.Exists(Path.Combine(Environment.ExpandEnvironmentVariables("%localappdata%"), "ms-playwright")))
 {
-    //TODO: pwsh bin/Debug/netX/playwright.ps1 install
+    var dir = new FileInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).DirectoryName;
+    var p = System.Diagnostics.Process.Start("pwsh", $"{dir}{Path.DirectorySeparatorChar}playwright.ps1 install");
+    await p.WaitForExitAsync();
 }
 
 host.Run();

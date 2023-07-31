@@ -64,41 +64,55 @@ public class PluginEndpoint
 
         _logger.LogInformation($"Starting to scrape {urlToScrape}");
 
+        var content = null as string;
+
         using var playwright = await Playwright.CreateAsync();
         {
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
-
-            var content = null as string;
-            
-            var maxRetry = 5;
-
-            for (var i = 0; i < maxRetry; i++)
+            try
             {
-                try
+                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+
+                var maxRetry = 5;
+
+                for (var i = 0; i < maxRetry; i++)
                 {
-                    content = await _ScrapePage(browser, urlToScrape);                    
-                    break; //exit the loop if we are successful in scraping the page
+                    try
+                    {
+                        content = await _ScrapePage(browser, urlToScrape);
+                        break; //exit the loop if we are successful in scraping the page
+                    }
+                    catch (System.TimeoutException) { }
                 }
-                catch (System.TimeoutException) { }
-            }          
 
-            if (content == null)
-            {
-                return req.CreateResponse(HttpStatusCode.BadRequest);
+                if (content == null)
+                {
+                    _logger.LogInformation($"Failed to scrape {urlToScrape}");
+
+                    return req.CreateResponse(HttpStatusCode.BadRequest);
+                }
+
+                if (summaryRequested)
+                {
+                    _logger.LogInformation($"Starting to summarise {urlToScrape}");
+
+                    var maxTokens = 2000;
+
+                    List<string> lines = TextChunker.SplitPlainTextLines(content, maxTokens);
+                    List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
+
+                    var context = _kernel.CreateNewContext();
+                    var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
+
+                    content = result.Result;
+                }
             }
-
-            if (summaryRequested)
+            catch
             {
-                var maxTokens = 2000;
-
-                List<string> lines = TextChunker.SplitPlainTextLines(content, maxTokens);
-                List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
-                
-                var context = _kernel.CreateNewContext();
-                var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
-                
-                content = result.Result;
+                //likely this is the first time the function has been called and the powershell script has not finished downloading the browser executables
+                return req.CreateResponse(HttpStatusCode.ServiceUnavailable);
             }
+            
+            _logger.LogInformation($"Scrape completed for {urlToScrape}");
 
             var r = req.CreateResponse(HttpStatusCode.OK);
             r.Headers.Add("Content-Type", "text/plain");
