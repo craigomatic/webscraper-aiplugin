@@ -1,6 +1,30 @@
 # Webscraper AIplugin
 AI Plugin that can be used to scrape useful information from a given URL. 
 
+## Configuration
+
+### Local dev
+Open ```local.settings.json``` and add values for each of the following fields:
+
+```CompletionConfig:AIService```
+
+One of AzureOpenAI or OpenAI
+
+```CompletionConfig:Endpoint``` 
+
+Your Azure endpoint if using Azure OpenAI, or empty if using OpenAI
+
+```CompletionConfig:DeploymentOrModelId``` 
+
+Your Azure deployment name if using Azure OpenAI, or model name if using OpenAI
+
+```CompletionConfig:Key``` 
+
+Your API key
+
+### Deploy to Azure
+You'll need to have all the same values listed above entered into Configuration -> Application Settings
+
 ## Usage
 You can run it locally and test functionality using the swagger UI, which will default to: http://localhost:7071/api/swagger/ui
 
@@ -12,5 +36,3 @@ Some options I like for this are:
 
 1. [Chat Copilot](https://github.com/microsoft/chat-copilot)
 2. [sk-researcher](https://github.com/craigomatic/sk-researcher)
-
-Note: Currently there is an issue getting the function to run the Powershell script when published to Azure.
