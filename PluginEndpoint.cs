@@ -70,7 +70,12 @@ public class PluginEndpoint
         {
             try
             {
-                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+                await using var browser = await playwright.Chromium.LaunchAsync(
+                    new BrowserTypeLaunchOptions 
+                    { 
+                        Headless = true, 
+                        ExecutablePath = PlaywrightBootstrapper.ChromiumExecutablePath
+                    });
 
                 var maxRetry = 5;
 
@@ -106,9 +111,11 @@ public class PluginEndpoint
                     content = result.Result;
                 }
             }
-            catch
+            catch(Exception e)
             {
-                //likely this is the first time the function has been called and the powershell script has not finished downloading the browser executables
+                _logger.LogError(e, $"Failed to scrape {urlToScrape}");
+
+                //most likely we have not finished downloading the chromium dependencies
                 return req.CreateResponse(HttpStatusCode.ServiceUnavailable);
             }
             

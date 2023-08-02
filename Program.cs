@@ -16,7 +16,7 @@ var host = new HostBuilder()
         
         builtConfig = config.Build();
         
-    })
+    })    
     .ConfigureServices(services =>
     {        
         services.AddScoped(
@@ -32,21 +32,29 @@ var host = new HostBuilder()
     })
     .Build();
 
-//check playwright has been installed
-if (!Directory.Exists(Path.Combine(Environment.ExpandEnvironmentVariables("%localappdata%"), "ms-playwright")))
+//check playwright has been installed.
+//we don't need to await as this can take some time and the plugin will return a 503 while in progress
+_ = Task.Run(() =>
 {
     var loggerFactory = host.Services.GetService<ILoggerFactory>();
     var depLogger = loggerFactory!.CreateLogger("Dependencies");
     depLogger.Log(LogLevel.Information, "Installing Playwright");
 
-    _ = Task.Run(async () =>
+    var result = PlaywrightBootstrapper.Run();
+    
+    switch(result)
     {
-        var dir = new FileInfo(System.Reflection.Assembly.GetExecutingAssembly().Location).DirectoryName;
-        var p = System.Diagnostics.Process.Start("pwsh", $"{dir}{Path.DirectorySeparatorChar}playwright.ps1 install");
-        await p.WaitForExitAsync();
+        case PlaywrightInstallStatus.AlreadyInstalled:
+            depLogger.Log(LogLevel.Information, "Playwright already installed");
+            break;
+        case PlaywrightInstallStatus.Installed:
+            depLogger.Log(LogLevel.Information, "Playwright installed");
+            break;
+        case PlaywrightInstallStatus.Failed:
+            depLogger.Log(LogLevel.Error, "Playwright failed to install");
+            break;
+    }
+});
 
-        depLogger.Log(LogLevel.Information, "Playwright installation completed");
-    });    
-}
 
 host.Run();
