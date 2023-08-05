@@ -26,7 +26,11 @@ Your API key
 You'll need to have all the same values listed above entered into Configuration -> Application Settings
 
 ## Usage
-You can run it locally and test functionality using the swagger UI, which will default to: http://localhost:7071/api/swagger/ui
+Run it locally with this command:
+
+```func run```
+
+You can test functionality using the swagger UI, which will default to: http://localhost:7071/api/swagger/ui
 
 Note that the first time the function runs, it will attempt to install the Playwright dependencies (chromium, etc) by running a powershell script and that requests to the endpoint will result in 503s while this is happening.
 
