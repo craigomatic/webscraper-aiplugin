@@ -32,7 +32,7 @@ public class PluginEndpoint
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route=".well-known/ai-plugin.json")] HttpRequestData req)
     {
         var toReturn = new AIPlugin();
-        toReturn.Api.Url = $"{req.Url.Scheme}://{req.Url.Host}:{req.Url.Port}/api/swagger.json";
+        toReturn.Api.Url = $"{req.Url.Scheme}://{req.Url.Host}:{req.Url.Port}/swagger.json";
 
         var r = req.CreateResponse(HttpStatusCode.OK);
         await r.WriteAsJsonAsync(toReturn);
