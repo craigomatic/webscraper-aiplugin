@@ -32,7 +32,7 @@ public class PluginEndpoint
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route=".well-known/ai-plugin.json")] HttpRequestData req)
     {
         var toReturn = new AIPlugin();
-        toReturn.Api.Url = $"{req.Url.Scheme}://{req.Url.Host}:{req.Url.Port}/api/swagger.json";
+        toReturn.Api.Url = $"{req.Url.Scheme}://{req.Url.Host}:{req.Url.Port}/swagger.json";
 
         var r = req.CreateResponse(HttpStatusCode.OK);
         await r.WriteAsJsonAsync(toReturn);
@@ -138,7 +138,33 @@ public class PluginEndpoint
 
         await page.GotoAsync(urlToScrape);
 
-        var locator = page.GetByRole(AriaRole.Main).First;
-        return await locator.InnerTextAsync();
+        var sectionsToAttempt = new[] { AriaRole.Article, AriaRole.Main, AriaRole.Application, AriaRole.Document, AriaRole.None };
+
+        foreach (var section in sectionsToAttempt)
+        {
+            try
+            {
+                return await _ScrapeSectionOfPage(page, section);
+            }
+            catch { }
+        }
+
+        throw new Exception("Unable to scrape this page as the content was not able to be located.");
+    }
+
+    private async Task<string> _ScrapeSectionOfPage(IPage page, AriaRole section)
+    {
+        var locators = page.GetByRole(section);
+
+        foreach (var locator in await locators.AllAsync())
+        {
+            try
+            {
+                return await locator.InnerTextAsync();
+            }
+            catch { }
+        }
+
+        throw new Exception($"Could not locate '{section}' in the page.");
     }
 }
