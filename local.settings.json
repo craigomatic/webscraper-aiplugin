@@ -4,6 +4,9 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated"
   },
+  "Host": {
+    "CORS": "*"
+  },
   "CompletionConfig": {
     "AIService": "",
     "DeploymentOrModelId": "",
