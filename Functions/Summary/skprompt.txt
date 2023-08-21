@@ -1,6 +1,7 @@
 Given the following content to summarise, create a summary that will allow the reader to understand the main points of the content.
 The summary should be grammatically correct and should not contain any spelling mistakes. 
 Do not incorporate other general knowledge.
+{{$SUMMARY_GOAL}}
 
 [CONTENT TO SUMMARISE]
 {{$INPUT}}

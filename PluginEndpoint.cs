@@ -42,6 +42,7 @@ public class PluginEndpoint
     [OpenApiOperation(operationId: "Scrape", tags: new[] { "ScrapeWebsiteFunction" }, Description = "Scrapes the given website to retrieve information based on the query.")]
     [OpenApiParameter(name: "URL", Description = "The URL of the website to scrape", Required = true, In = ParameterLocation.Query)]
     [OpenApiParameter(name: "Summarise", Description = "If true, the returned result will be the summary of the page, when false it will be the entire contents of the page", Required = false, In = ParameterLocation.Query)]
+    [OpenApiParameter(name: "SummaryGoal", Description = "When summarise is true and a goal is specified, the summary of the page should take into consideration this goal", Required = false, In = ParameterLocation.Query)]
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.OK, contentType: "text/plain", bodyType: typeof(string), Description = "Returns the information that was scraped from the website that is relevant to the query")]
     [OpenApiResponseWithBody(statusCode: HttpStatusCode.BadRequest, contentType: "application/json", bodyType: typeof(string), Description = "Returns the error of the input.")]
     [Function("ScrapeWebsiteWithQuery")]
@@ -61,6 +62,9 @@ public class PluginEndpoint
         {
             return req.CreateResponse(HttpStatusCode.BadRequest);
         }
+
+        var summaryGoal = req.Query("SummaryGoal").FirstOrDefault() == null ? string.Empty :
+            req.Query("SummaryGoal").First();
 
         _logger.LogInformation($"Starting to scrape {urlToScrape}");
 
@@ -106,8 +110,13 @@ public class PluginEndpoint
                     List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
 
                     var context = _kernel.CreateNewContext();
-                    var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
 
+                    if (!string.IsNullOrWhiteSpace(summaryGoal))
+                    {
+                        context.Variables["SUMMARY_GOAL"] = $"This content is being summarised with the following goal: {summaryGoal}";
+                    }
+
+                    var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
                     content = result.Result;
                 }
             }
