@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using System.Text;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Extensions.OpenApi.Extensions;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -10,6 +11,7 @@ using Microsoft.Playwright;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.SkillDefinition;
 using Microsoft.SemanticKernel.Text;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
 public class PluginEndpoint
 {
@@ -68,6 +70,71 @@ public class PluginEndpoint
 
         _logger.LogInformation($"Starting to scrape {urlToScrape}");
 
+        var resolvedUri = await _ResolveRedirects(urlToScrape);
+
+        var result = resolvedUri.EndsWith(".pdf") ?
+            await _ScrapePdf(resolvedUri, summaryRequested, summaryGoal) :
+            await _ScrapeHtml(resolvedUri, summaryRequested, summaryGoal);
+
+        var r = req.CreateResponse(result.StatusCode);
+        r.Headers.Add("Content-Type", "text/plain");
+        await r.WriteStringAsync(result.ErrorMessage == null ? result.Content : result.ErrorMessage);
+        return r;
+    }
+
+    private async Task<string> _ResolveRedirects(string urlToScrape)
+    {
+        using (var httpClient = new HttpClient())
+        {
+            var response = await httpClient.GetAsync(urlToScrape, HttpCompletionOption.ResponseHeadersRead);
+
+            if (response.RequestMessage == null)
+            {
+                return urlToScrape;
+            }
+
+            return response.RequestMessage.RequestUri == null ? urlToScrape : response.RequestMessage.RequestUri.ToString();
+        }
+    }
+
+    private async Task<ScrapeResult> _ScrapePdf(string urlToScrape, bool summaryRequested, string summaryGoal)
+    {
+        var content = null as string;
+
+        using (var httpClient = new HttpClient())
+        {
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36 Edg/112.0.1722.39");
+            var response = await httpClient.GetAsync(urlToScrape);
+
+            using (var stream = await response.Content.ReadAsStreamAsync())
+            {
+                using (var pdfDoc = UglyToad.PdfPig.PdfDocument.Open(stream))
+                {
+                    //read all pages of the PDF to string
+                    var pages = pdfDoc.GetPages();
+                    var sb = new StringBuilder();
+
+                    foreach (var page in pages)
+                    {
+                        sb.Append(ContentOrderTextExtractor.GetText(page));
+                    }
+
+                    content = sb.ToString();
+
+                    if (summaryRequested)
+                    {
+                        _logger.LogInformation($"Starting to summarise {urlToScrape}");
+                        content = await _SummariseContent(content, summaryGoal);
+                    }
+                }
+            }
+        }
+
+        return new ScrapeResult { StatusCode = HttpStatusCode.OK, Content = content };
+    }
+
+    private async Task<ScrapeResult> _ScrapeHtml(string urlToScrape, bool summaryRequested, string summaryGoal)
+    {
         var content = null as string;
 
         using var playwright = await Playwright.CreateAsync();
@@ -75,10 +142,10 @@ public class PluginEndpoint
             try
             {
                 await using var browser = await playwright.Chromium.LaunchAsync(
-                    new BrowserTypeLaunchOptions 
-                    { 
-                        Headless = true, 
-                        ExecutablePath = PlaywrightBootstrapper.ChromiumExecutablePath
+                    new BrowserTypeLaunchOptions
+                    {
+                        Headless = true,
+                        ExecutablePath = PlaywrightBootstrapper.ChromiumExecutablePath                        
                     });
 
                 var maxRetry = 5;
@@ -97,44 +164,45 @@ public class PluginEndpoint
                 {
                     _logger.LogInformation($"Failed to scrape {urlToScrape}");
 
-                    return req.CreateResponse(HttpStatusCode.BadRequest);
+                    return new ScrapeResult { StatusCode = HttpStatusCode.BadRequest, ErrorMessage = "Could not scrape page" };
                 }
 
                 if (summaryRequested)
                 {
                     _logger.LogInformation($"Starting to summarise {urlToScrape}");
-
-                    var maxTokens = 2000;
-
-                    List<string> lines = TextChunker.SplitPlainTextLines(content, maxTokens);
-                    List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
-
-                    var context = _kernel.CreateNewContext();
-
-                    if (!string.IsNullOrWhiteSpace(summaryGoal))
-                    {
-                        context.Variables["SUMMARY_GOAL"] = $"This content is being summarised with the following goal: {summaryGoal}";
-                    }
-
-                    var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
-                    content = result.Result;
+                    content = await _SummariseContent(content, summaryGoal);
                 }
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 _logger.LogError(e, $"Failed to scrape {urlToScrape}");
 
                 //most likely we have not finished downloading the chromium dependencies
-                return req.CreateResponse(HttpStatusCode.ServiceUnavailable);
+                return new ScrapeResult { ErrorMessage = e.Message, StatusCode = HttpStatusCode.ServiceUnavailable };
             }
-            
-            _logger.LogInformation($"Scrape completed for {urlToScrape}");
 
-            var r = req.CreateResponse(HttpStatusCode.OK);
-            r.Headers.Add("Content-Type", "text/plain");
-            await r.WriteStringAsync(content);
-            return r;
-        }        
+            _logger.LogInformation($"Scrape completed for {urlToScrape}");            
+        }
+
+        return new ScrapeResult { Content = content, StatusCode = HttpStatusCode.OK };
+    }
+
+    private async Task<string> _SummariseContent(string content, string summaryGoal)
+    {        
+        var maxTokens = 2000;
+
+        List<string> lines = TextChunker.SplitPlainTextLines(content, maxTokens);
+        List<string> paragraphs = TextChunker.SplitPlainTextParagraphs(lines, maxTokens);
+
+        var context = _kernel.CreateNewContext();
+
+        if (!string.IsNullOrWhiteSpace(summaryGoal))
+        {
+            context.Variables["SUMMARY_GOAL"] = $"This content is being summarised with the following goal: {summaryGoal}";
+        }
+
+        var result = await this._summaryFunction.AggregatePartitionedResultsAsync(paragraphs, context);
+        return result.Result;
     }
 
     private async Task<string> _ScrapePage(IBrowser browser, string urlToScrape)
@@ -175,5 +243,14 @@ public class PluginEndpoint
         }
 
         throw new Exception($"Could not locate '{section}' in the page.");
+    }
+
+    private class ScrapeResult
+    {
+        public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.OK;
+
+        public string? ErrorMessage { get; set; } = null;
+
+        public string Content { get; set; } = string.Empty;
     }
 }
